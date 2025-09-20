@@ -45,7 +45,7 @@ void Export()
 {
     string outputDir = Path.Combine(Directory.GetCurrentDirectory(), "output");
     Directory.CreateDirectory(outputDir);
-    
+
     // 1. Rebuild main_file_cache.dat sequentially
     string dataPath = Path.Combine(outputDir, "main_file_cache.dat");
     using var dataFile = new FileStream(dataPath, FileMode.Create, FileAccess.Write);
@@ -60,7 +60,7 @@ void Export()
             FileBlockManager.WriteFileBlocks(dataFile, entry, fileData);
         }
     }
-    
+
     // 2. Rebuild all .idx files
     for (int i = 0; i <= 4; i++)
     {
@@ -82,6 +82,6 @@ void Export()
             fs.Write(buffer, 0, buffer.Length);
         }
     }
-    
+
     Console.WriteLine("Cache successfully exported to 'output' folder.");
 }
