@@ -4,7 +4,6 @@ using CachManager.FileBlocks;
 using CachManager.Idx;
 
 string cacheDirectory = "cache";
-
 var allEntries = new List<RSIndex>();
 
 IndexManager idxManager = new IndexManager();
