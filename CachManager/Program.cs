@@ -1,9 +1,17 @@
-﻿using CacheManager;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using CacheManager;
 using CachManager.Archive;
 using CachManager.FileBlocks;
 using CachManager.Idx;
 
-string cacheDirectory = "cache";
+string cacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "CacheTool317",
+                        "cache");
+
+Directory.CreateDirectory(cacheDirectory);
+
 var allEntries = new List<RSIndex>();
 
 IndexManager idxManager = new IndexManager();
@@ -42,7 +50,7 @@ Export();
 
 void Export()
 {
-    string outputDir = Path.Combine(Directory.GetCurrentDirectory(), "output");
+    string outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CacheTool317", "output");
     Directory.CreateDirectory(outputDir);
 
     // 1. Rebuild main_file_cache.dat sequentially
