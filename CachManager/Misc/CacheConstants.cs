@@ -27,4 +27,26 @@ public static class CacheConstants
     public const int SubArchiveTextureIndex = 6;
     public const int SubArchiveWordencIndex = 7;
     public const int SubArchiveSoundIndex = 8;
+    
+    public static readonly Dictionary<int, string> ArchiveNames = new()
+    {
+        { 0, "archive" },
+        { 1, "model" },
+        { 2, "anim" },
+        { 3, "music" },
+        { 4, "map" },
+    };
+    
+    public static readonly Dictionary<int, string> SubArchiveNames = new()
+    {
+        { 0, "empty.dat" },
+        { 1, "title.dat" },
+        { 2, "config.dat" },
+        { 3, "interface.dat" },
+        { 4, "media.dat" },
+        { 5, "versionlist.dat" },
+        { 6, "texture.dat" },
+        { 7, "wordenc.dat" },
+        { 8, "sound.dat" }
+    };
 }

@@ -1,22 +1,24 @@
+using CacheManager;
+
 namespace CachManager.Archive;
 
-public class SubArchiveFile
+public class SubArchiveFile(int id, string name, byte[] rawData, int decompressedSize, int compressedSize, bool isCompressed)
 {
-    public int Id { get; }
-    public byte[] Data { get; set; }
-    public byte[] RawData { get; }
-    public int CompressedSize { get; }
-    public int DecompressedSize { get; }
-    public bool WasCompressed { get; }
-    public byte[] OriginalHeader { get; set; }
+    public int Id { get; } = id;
+    public string Name { get; } = name;
+    public byte[] RawData { get; } = rawData;
+    public int DecompressedSize { get; } = decompressedSize;
+    public int CompressedSize { get; } = compressedSize;
+    public bool IsCompressed { get; } = isCompressed;
 
-    public SubArchiveFile(int id, byte[] data, byte[] rawData, int compressedSize, int decompressedSize, bool wasCompressed)
+    public byte[] GetDecompressedData()
     {
-        Id = id;
-        Data = data;
-        RawData = rawData;
-        CompressedSize = compressedSize;
-        DecompressedSize = decompressedSize;
-        WasCompressed = wasCompressed;
+        if (!IsCompressed) return RawData;
+        
+        var decompressed = BZip2Helper.Decompress(RawData);
+        if (decompressed.Length != DecompressedSize)
+            throw new InvalidDataException($"Decompression size mismatch for file {Id}");
+        
+        return decompressed;
     }
 }

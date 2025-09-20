@@ -8,147 +8,124 @@ public class ArchiveManager
     private IndexManager _indexManager;
     private FileStream _dataFile;
 
-
     public void Initialize(string cacheDirectory)
     {
         _indexManager = new IndexManager();
         _indexManager.Initialize(cacheDirectory);
-
         string dataFilePath = Path.Combine(cacheDirectory, CacheConstants.DataFile);
         _dataFile = new FileStream(dataFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
     }
 
-    public List<byte[]> GetArchiveFileBuffers(int idx)
+    /// <summary>
+    /// Prepares and extracts data from a sub-archive buffer by processing the header
+    /// and decompressing the data if necessary.
+    /// </summary>
+    /// <param name="data">The raw sub-archive data containing header and compressed/uncompressed content.</param>
+    /// <returns>The extracted and processed archive data as a byte array.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when the input data is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when the input data is empty or too short to contain a valid header.</exception>
+    /// <exception cref="IOException">Thrown when decompression fails or the data format is invalid.</exception>
+    /// <exception cref="InvalidDataException">Thrown when the header contains invalid size information.</exception>
+    public byte[] PrepareSubArchiveBuffer(byte[] data)
     {
-        var entries = _indexManager.GetEntriesForIdx(idx);
-        var idxFiles = new List<byte[]>();
+        if (data == null)
+            throw new ArgumentNullException(nameof(data), "Input data cannot be null");
 
-        foreach (var entry in entries)
-        {
-            var fileBuffer = ReadFileBlocks(entry);
-            idxFiles.Add(fileBuffer);
-        }
+        if (data.Length < 6)
+            throw new ArgumentException("Input data is too short to contain a valid header", nameof(data));
 
-        return idxFiles;
-    }
+        ReadOnlySpan<byte> headerBytes = data.AsSpan(0, 6);
+        int decompressedSize = (headerBytes[0] << 16) | (headerBytes[1] << 8) | headerBytes[2];
+        int compressedSize = (headerBytes[3] << 16) | (headerBytes[4] << 8) | headerBytes[5];
 
-    public byte[] ReadFileBlocks(IndexEntry entry)
-    {
-        byte[] output = new byte[entry.Size];
-        int bytesRead = 0;
-        int currentBlock = entry.StartBlock;
+        if (decompressedSize <= 0)
+            throw new InvalidDataException($"Invalid decompressed size: {decompressedSize}");
 
-        while (bytesRead < entry.Size)
-        {
-            byte[] header = new byte[CacheConstants.HeaderSize];
-            long blockPosition = currentBlock * CacheConstants.BlockSize;
+        if (compressedSize <= 0)
+            throw new InvalidDataException($"Invalid compressed size: {compressedSize}");
 
-            _dataFile.Seek(blockPosition, SeekOrigin.Begin);
-            int headerBytesRead = _dataFile.Read(header, 0, header.Length);
+        int remainingDataLength = data.Length - 6;
+        if (compressedSize > remainingDataLength)
+            throw new InvalidDataException(
+                $"Compressed size ({compressedSize}) exceeds available data ({remainingDataLength})");
 
-            if (headerBytesRead != header.Length)
-                throw new IOException($"Failed to read header at block {currentBlock}");
-
-            int nextBlock = (header[4] << 16) | (header[5] << 8) | header[6];
-            int remainingBytes = entry.Size - bytesRead;
-            int bytesToRead = Math.Min(remainingBytes, CacheConstants.ChunkSize);
-
-            int dataBytesRead = _dataFile.Read(output, bytesRead, bytesToRead);
-            if (dataBytesRead != bytesToRead)
-                throw new IOException($"Failed to read data at block {currentBlock}");
-
-            bytesRead += bytesToRead;
-            currentBlock = nextBlock;
-
-            if (currentBlock == 0 && bytesRead < entry.Size)
-                throw new IOException($"Unexpected end of file chain at block {currentBlock}");
-        }
-
-        return output;
-    }
-
-    public List<SubArchiveFile> ParseArchiveData(byte[] data)
-    {
-        var files = new List<SubArchiveFile>();
-        if (data == null || data.Length == 0)
-            return files;
-
-        byte[] headerBytes = data[..6];
-
-        using var ms = new MemoryStream(data[6..]);
-        using var br = new BinaryReader(ms);
-
-        int dcSize = (headerBytes[0] << 16) | (headerBytes[1] << 8) | headerBytes[2];
-        int cSize = (headerBytes[3] << 16) | (headerBytes[4] << 8) | headerBytes[5];
+        using var memoryStream = new MemoryStream(data, 6, remainingDataLength);
+        using var binaryReader = new BinaryReader(memoryStream);
 
         byte[] archiveData;
 
-        if (dcSize != cSize)
+        if (decompressedSize != compressedSize)
         {
-            byte[] compressedData = br.ReadBytes(cSize);
+            byte[] compressedData = binaryReader.ReadBytes(compressedSize);
             archiveData = BZip2Helper.Decompress(compressedData);
+
+            if (archiveData.Length != decompressedSize)
+                throw new IOException(
+                    $"Decompressed size mismatch. Expected {decompressedSize}, got {archiveData.Length}");
         }
         else
-        {
-            archiveData = br.ReadBytes(dcSize);
-        }
+            archiveData = binaryReader.ReadBytes(decompressedSize);
 
-        using var contentStream = new MemoryStream(archiveData);
-        using var contentReader = new BinaryReader(contentStream);
-        files = ParseArchiveContents(contentReader, files);
-
-        // Attach header for rebuilding
-        foreach (var f in files)
-            f.OriginalHeader = headerBytes;
-
-        return files;
+        return archiveData;
     }
 
-    
-    
-    private List<SubArchiveFile> ParseArchiveContents(BinaryReader reader, List<SubArchiveFile> files)
+    public List<SubArchiveFile> ReadSubArchiveFiles(byte[] dataBuffer)
     {
-        try
-        {
-            int fileCount = reader.ReadUInt16BigEndian();
-            Console.WriteLine($"Found {fileCount} files in archive");
-            
-            var entries = new List<(int id, int decompressedSize, int compressedSize, bool isCompressed)>();
-            for (int i = 0; i < fileCount; i++)
-            {
-                int id = reader.ReadInt32BigEndian();
-                int decompressedSize = reader.ReadUnsignedMedium();
-                int compressedSize = reader.ReadUnsignedMedium();
-                bool isCompressed = decompressedSize != compressedSize;
-                
-                entries.Add((id, decompressedSize, compressedSize, isCompressed));
-            }
+        var files = new List<SubArchiveFile>();
 
-            foreach (var (id, decompressedSize, compressedSize, isCompressed) in entries)
+        if (dataBuffer == null || dataBuffer.Length == 0)
+            return files;
+
+        using (var ms = new MemoryStream(dataBuffer))
+        using (var reader = new BinaryReader(ms))
+        {
+            try
             {
-                try
+                int fileCount = reader.ReadUInt16BigEndian();
+                Console.WriteLine($"Found {fileCount} files in archive");
+
+                // First Pass: Read Table Entries
+                var entries = new List<SubArchiveFileTableEntry>();
+                for (int i = 0; i < fileCount; i++)
                 {
-                    byte[] rawData = reader.ReadBytes(compressedSize);
-                    byte[] fileData = rawData;
-                    if (isCompressed)
-                    {
-                        fileData = BZip2Helper.Decompress(fileData);
-                        if (fileData.Length != decompressedSize)
-                            Console.WriteLine($"Size mismatch for {id}: Expected {decompressedSize}, got {fileData.Length}");
-                    }
-                    files.Add(new SubArchiveFile(id, fileData, rawData, compressedSize, decompressedSize, isCompressed));
+                    int id = reader.ReadInt32BigEndian();
+                    int decompressedSize = reader.ReadUnsignedMedium();
+                    int compressedSize = reader.ReadUnsignedMedium();
+                    bool isCompressed = decompressedSize != compressedSize;
+                    
+                    var lookedUpName = EntryDictionary.Lookup(id);
+                    var name = lookedUpName == "Unknown" ? id.ToString() : lookedUpName;
+
+                    entries.Add(new SubArchiveFileTableEntry(id, name, decompressedSize, compressedSize, isCompressed));
                 }
-                catch (Exception ex)
+
+                // Second Pass: Read File Data
+                foreach (var entry in entries)
                 {
-                    Console.WriteLine($"Failed to read file {id}: {ex.Message}");
+                    try
+                    {
+                        byte[] rawData = reader.ReadBytes(entry.CompressedSize);
+
+                        files.Add(new SubArchiveFile(entry.Id,
+                                                     entry.Name,
+                                                     rawData,
+                                                     entry.DecompressedSize,
+                                                     entry.CompressedSize,
+                                                     entry.IsCompressed));
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new IOException($"Failed to read file data for entry {entry.Id}", ex);
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error parsing archive data: {ex.Message}");
+                throw new InvalidDataException("Failed to parse sub-archive file structure", ex);
+            }
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error parsing archive data: {ex.Message}");
-        }
-    
+
         return files;
     }
 }

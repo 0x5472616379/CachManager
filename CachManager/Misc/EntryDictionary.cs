@@ -189,4 +189,9 @@ public class EntryDictionary
             return "Unknown";
         return name;
     }
+
+    public static int Hash(string name)
+    {
+        return name.ToUpper().ToCharArray().Aggregate(0, (hash, character) => hash * 61 + character - 32);
+    }
 }
