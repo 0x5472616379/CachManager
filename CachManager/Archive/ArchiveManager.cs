@@ -34,6 +34,7 @@ public class ArchiveManager
         if (data.Length < 6)
             throw new ArgumentException("Input data is too short to contain a valid header", nameof(data));
 
+        // Read Header
         ReadOnlySpan<byte> headerBytes = data.AsSpan(0, 6);
         int decompressedSize = (headerBytes[0] << 16) | (headerBytes[1] << 8) | headerBytes[2];
         int compressedSize = (headerBytes[3] << 16) | (headerBytes[4] << 8) | headerBytes[5];
@@ -53,7 +54,7 @@ public class ArchiveManager
         using var binaryReader = new BinaryReader(memoryStream);
 
         byte[] archiveData;
-
+        // Read actual data
         if (decompressedSize != compressedSize)
         {
             byte[] compressedData = binaryReader.ReadBytes(compressedSize);
@@ -95,8 +96,9 @@ public class ArchiveManager
                     
                     var lookedUpName = EntryDictionary.Lookup(id);
                     var name = lookedUpName == "Unknown" ? id.ToString() : lookedUpName;
-
+                    Console.WriteLine($"File: {name} - Compressed: {isCompressed} - Decompressed: {decompressedSize} - CompressedSize: {compressedSize}");
                     entries.Add(new SubArchiveFileTableEntry(id, name, decompressedSize, compressedSize, isCompressed));
+                    
                 }
 
                 // Second Pass: Read File Data

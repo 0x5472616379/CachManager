@@ -1,16 +1,17 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using CacheManager;
+﻿using CacheManager;
 using CachManager.Archive;
 using CachManager.FileBlocks;
 using CachManager.Idx;
 
 string cacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                        "CacheTool317",
-                        "cache");
+    "CacheTool317",
+    "cache");
+
+string outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CacheTool317",
+    "output");
 
 Directory.CreateDirectory(cacheDirectory);
+Directory.CreateDirectory(outputDir);
 
 var allEntries = new List<RSIndex>();
 
@@ -31,7 +32,20 @@ var subArchiveConfigBuffer = FileBlockManager.GetFileBuffer(subArchiveConfigInde
 var preparedSubArchiveBuffer = archiveManager.PrepareSubArchiveBuffer(subArchiveConfigBuffer);
 var subArchiveFiles = archiveManager.ReadSubArchiveFiles(preparedSubArchiveBuffer);
 
-//Load entire cache in memory.
+var objIdx = subArchiveFiles.FirstOrDefault(x => x.Id == EntryDictionary.Hash("obj.idx"));
+var objDat = subArchiveFiles.FirstOrDefault(x => x.Id == EntryDictionary.Hash("obj.dat"));
+
+var decompressedIdx = BZip2Helper.Decompress(objIdx.RawData);
+var decompressedDat = BZip2Helper.Decompress(objDat.RawData);
+
+//Decode Data from obj.dat/idx which are located in the subarchive "config"
+ItemDefDecoder decoder = new ItemDefDecoder();
+decoder.Run(decompressedIdx, decompressedDat);
+var defs = decoder.Definitions;
+var redCape = defs[1007];
+Console.WriteLine(redCape.Name); //etc
+
+
 byte[][][] data = new byte[5][][];
 
 for (int x = 0; x <= 4; x++)
@@ -50,9 +64,6 @@ Export();
 
 void Export()
 {
-    string outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CacheTool317", "output");
-    Directory.CreateDirectory(outputDir);
-
     // 1. Rebuild main_file_cache.dat sequentially
     string dataPath = Path.Combine(outputDir, "main_file_cache.dat");
     using var dataFile = new FileStream(dataPath, FileMode.Create, FileAccess.Write);
