@@ -1,4 +1,5 @@
 ﻿using CacheManager;
+using CacheManager.Items;
 using CachManager.Archive;
 using CachManager.FileBlocks;
 using CachManager.Idx;
@@ -10,8 +11,12 @@ string cacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.Speci
 string outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CacheTool317",
     "output");
 
+string testDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CacheTool317",
+    "test");
+
 Directory.CreateDirectory(cacheDirectory);
 Directory.CreateDirectory(outputDir);
+Directory.CreateDirectory(testDir);
 
 var allEntries = new List<RSIndex>();
 
@@ -32,22 +37,10 @@ var subArchiveConfigBuffer = FileBlockManager.GetFileBuffer(subArchiveConfigInde
 var preparedSubArchiveBuffer = archiveManager.PrepareSubArchiveBuffer(subArchiveConfigBuffer);
 var subArchiveFiles = archiveManager.ReadSubArchiveFiles(preparedSubArchiveBuffer);
 
-var objIdx = subArchiveFiles.FirstOrDefault(x => x.Id == EntryDictionary.Hash("obj.idx"));
-var objDat = subArchiveFiles.FirstOrDefault(x => x.Id == EntryDictionary.Hash("obj.dat"));
 
-var decompressedIdx = BZip2Helper.Decompress(objIdx.RawData);
-var decompressedDat = BZip2Helper.Decompress(objDat.RawData);
-
-//Decode Data from obj.dat/idx which are located in the subarchive "config"
-ItemDefDecoder decoder = new ItemDefDecoder();
-decoder.Run(decompressedIdx, decompressedDat);
-var defs = decoder.Definitions;
-var redCape = defs[1007];
-Console.WriteLine(redCape.Name); //etc
 
 
 byte[][][] data = new byte[5][][];
-
 for (int x = 0; x <= 4; x++)
 {
     var index = idxManager.CreateIndex(x);
@@ -60,6 +53,7 @@ for (int x = 0; x <= 4; x++)
     }
 }
 
+ModifyItemData();
 Export();
 
 void Export()
@@ -73,7 +67,7 @@ void Export()
         {
             var entry = allEntries[i].Entries[y];
             var fileData = data[i][y];
-
+            
             // Append each file to the .dat and update IndexEntry (FirstBlock, FileSize)
             FileBlockManager.WriteFileBlocks(dataFile, entry, fileData);
         }
@@ -102,4 +96,118 @@ void Export()
     }
 
     Console.WriteLine("Cache successfully exported to 'output' folder.");
+}
+
+
+
+void ModifyItemData()
+{
+    // Get the config sub-archive files
+    var objIdx = subArchiveFiles.FirstOrDefault(x => x.Id == EntryDictionary.Hash("obj.idx"));
+    var objDat = subArchiveFiles.FirstOrDefault(x => x.Id == EntryDictionary.Hash("obj.dat"));
+    
+    if (objIdx == null || objDat == null)
+    {
+        Console.WriteLine("Could not find obj.idx or obj.dat in config archive");
+        return;
+    }
+
+    // Decompress and decode
+    var decompressedIdx = objIdx.IsCompressed ? BZip2Helper.Decompress(objIdx.RawData) : objIdx.RawData;
+    var decompressedDat = objDat.IsCompressed ? BZip2Helper.Decompress(objDat.RawData) : objDat.RawData;
+    
+    ItemDefDecoder decoder = new ItemDefDecoder();
+    decoder.Run(decompressedIdx, decompressedDat);
+    var defs = decoder.Definitions;
+    
+    // Modify index 1007
+    if (defs.Length > 1007)
+    {
+        var redCape = defs[1007];
+        Console.WriteLine($"Original name: {redCape.Name}");
+        redCape.Name = "Cape of neitiznot";
+        Console.WriteLine($"Modified name: {redCape.Name}");
+    }
+    else
+    {
+        Console.WriteLine($"Item index 1007 not found. Total items: {defs.Length}");
+        return;
+    }
+    
+     // Re-encode the definitions
+     var (newIdxData, newDatData) = ItemDefEncoder.Encode(defs);
+    
+     File.WriteAllBytes(Path.Combine(testDir, "originalObjIdx.bin"), decompressedIdx);
+     File.WriteAllBytes(Path.Combine(testDir, "originalObjDat.bin"), decompressedDat);
+     
+     File.WriteAllBytes(Path.Combine(testDir, "newObjIdx.bin"), newIdxData);
+     File.WriteAllBytes(Path.Combine(testDir, "newObjDat.bin"), newDatData);
+     
+     // Compress the data
+     byte[] compressedIdx = BZip2Helper.Compress(newIdxData);
+     byte[] compressedDat = BZip2Helper.Compress(newDatData);
+    
+      // Update the sub-archive files
+      objIdx.RawData = compressedIdx;
+      objIdx.CompressedSize = compressedIdx.Length;
+      objIdx.DecompressedSize = newIdxData.Length;
+      objIdx.IsCompressed = true;
+     
+      objDat.RawData = compressedDat;
+      objDat.CompressedSize = compressedDat.Length;
+      objDat.DecompressedSize = newDatData.Length;
+      objDat.IsCompressed = true;
+    
+    // Now rebuild the config sub-archive buffer (should not be compressed)
+    byte[] newConfigBuffer = RebuildSubArchiveBuffer(subArchiveFiles);
+
+    var length = newConfigBuffer.Length;
+    var fullConfigBuffer = CreateSubArchiveWithHeader(length, length, newConfigBuffer);
+    
+    // Update the main cache data
+    data[CacheConstants.ArchiveIndex][CacheConstants.SubArchiveConfigIndex] = fullConfigBuffer;
+    
+    Console.WriteLine("Item data modified successfully");
+}
+
+byte[] CreateSubArchiveWithHeader(int decompressedSize, int compressedSize, byte[] compressedData)
+{
+    using (var ms = new MemoryStream())
+    using (var writer = new BinaryWriter(ms))
+    {
+        // Write the sub-archive header (6 bytes)
+        writer.WriteUnsignedMedium(decompressedSize);
+        writer.WriteUnsignedMedium(compressedSize);
+        
+        // Write the data
+        writer.Write(compressedData);
+        
+        return ms.ToArray();
+    }
+}
+
+byte[] RebuildSubArchiveBuffer(List<SubArchiveFile> files)
+{
+    using (var ms = new MemoryStream())
+    using (var writer = new BinaryWriter(ms))
+    {
+        // Write file count
+        writer.WriteUInt16BigEndian((ushort)files.Count);
+        
+        // Write table entries
+        foreach (var file in files)
+        {
+            writer.WriteInt32BigEndian(file.Id);
+            writer.WriteUnsignedMedium(file.DecompressedSize);
+            writer.WriteUnsignedMedium(file.CompressedSize);
+        }
+        
+        // Write file data
+        foreach (var file in files)
+        {
+            writer.Write(file.RawData);
+        }
+        
+        return ms.ToArray();
+    }
 }

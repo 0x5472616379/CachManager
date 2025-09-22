@@ -6,10 +6,10 @@ public class SubArchiveFile(int id, string name, byte[] rawData, int decompresse
 {
     public int Id { get; } = id;
     public string Name { get; } = name;
-    public byte[] RawData { get; } = rawData;
-    public int DecompressedSize { get; } = decompressedSize;
-    public int CompressedSize { get; } = compressedSize;
-    public bool IsCompressed { get; } = isCompressed;
+    public byte[] RawData { get; set; } = rawData;
+    public int DecompressedSize { get; set; } = decompressedSize;
+    public int CompressedSize { get; set; } = compressedSize;
+    public bool IsCompressed { get; set; } = isCompressed;
 
     public byte[] GetDecompressedData()
     {

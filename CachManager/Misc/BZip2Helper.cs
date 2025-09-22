@@ -19,20 +19,19 @@ public static class BZip2Helper
         decompressor.CopyTo(output);
         return output.ToArray();
     }
-    
-    public static byte[] Compress(byte[] data)
+    public static byte[] Compress(byte[] data, bool stripHeader = true, int level = 1)
     {
+        using var input = new MemoryStream(data);
         using var output = new MemoryStream();
-        using var compressor = new BZip2OutputStream(output);
-
-        compressor.Write(data, 0, data.Length);
-        compressor.Close();
-
-        // The client expects the data without BZIP2 header (I think)
+    
+        BZip2.Compress(input, output, isStreamOwner: false, level: level);
+    
         byte[] compressed = output.ToArray();
+    
+        if (!stripHeader) return compressed;
+
         byte[] withoutHeader = new byte[compressed.Length - 4];
         Buffer.BlockCopy(compressed, 4, withoutHeader, 0, withoutHeader.Length);
-
         return withoutHeader;
     }
 }

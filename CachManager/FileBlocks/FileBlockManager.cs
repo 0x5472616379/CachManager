@@ -91,9 +91,10 @@ public class FileBlockManager
         int written = 0;
         int part = 0;
 
-        int sector = (int)((datFile.Length + 519) / 520);
-        if (sector == 0) sector = 1;
-
+        int sector = (int)((datFile.Length + 519) / 520); // round up to next sector
+        if (sector == 0) sector = 1; // first sector is 1
+        
+        
         entry.FirstBlock = sector;
         entry.FileSize = size;
 
@@ -101,10 +102,10 @@ public class FileBlockManager
         {
             int remaining = size - written;
             int chunkSize = Math.Min(remaining, 512);
-
             int nextSector = (remaining > 512) ? sector + 1 : 0;
 
-            Span<byte> block = stackalloc byte[520];
+            int blockSize = 8 + chunkSize; // Only full block if not last
+            Span<byte> block = stackalloc byte[520]; // still allocate max for safety
 
             block[0] = (byte)((entry.EntryId >> 8) & 0xFF);
             block[1] = (byte)(entry.EntryId & 0xFF);
@@ -113,13 +114,13 @@ public class FileBlockManager
             block[4] = (byte)((nextSector >> 16) & 0xFF);
             block[5] = (byte)((nextSector >> 8) & 0xFF);
             block[6] = (byte)(nextSector & 0xFF);
-            block[7] = (byte)(entry.CacheIndex + 1); //Index based so it needs a +1
+            block[7] = (byte)(entry.CacheIndex + 1);
 
             for (int i = 0; i < chunkSize; i++)
                 block[8 + i] = fileData[written + i];
 
             datFile.Seek(sector * 520L, SeekOrigin.Begin);
-            datFile.Write(block);
+            datFile.Write(block.Slice(0, blockSize)); // write exact bytes, no padding for last
 
             written += chunkSize;
             part++;
